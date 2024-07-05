@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Any, Callable, NamedTuple, Sequence, Self
 from textwrap import wrap, dedent
 
+from sympy import false
+
 from erdb.table import Table
 from erdb.loaders import GAME_VERSIONS
 from erdb.utils.changelog import FormatterBase
@@ -308,7 +310,8 @@ class Map(_Subcommand):
 
     arguments = [
         _Argument.make("--lod", "-l", type=int, default=0, help="Level of detail of the map, 0 is highest."),
-        _Argument.make("--underground", action=BooleanOptionalAction, help="Specifies whether to extract the underground map instead of the overworld."),
+        _Argument.make("--dlc", action=BooleanOptionalAction, default=False, help="Specifies whether to extract the DLC map instead of base game."),
+        _Argument.make("--underground", action=BooleanOptionalAction, default=False, help="Specifies whether to extract the underground map instead of the overworld."),
     ] + _Argument.sources_gamedata() + _Argument.outputs_file()
 
 class Icons(_Subcommand):

@@ -130,7 +130,7 @@ class App:
         return 0
 
     @staticmethod
-    def source_map(lod: int, underground: bool, game_dir: Path, ignore_checksum: bool, keep_cache: bool, out: Path | None) -> int:
+    def source_map(lod: int, dlc: bool, underground: bool, game_dir: Path, ignore_checksum: bool, keep_cache: bool, out: Path | None) -> int:
         game_dir = game_dir.resolve()
 
         if out is not None:
@@ -139,7 +139,7 @@ class App:
         print(f"\n>>> Extracting map from \"{game_dir}\".")
 
         try:
-            source_map(game_dir, out, lod, underground, ignore_checksum, keep_cache)
+            source_map(game_dir, out, lod, dlc, underground, ignore_checksum, keep_cache)
 
         except AssertionError as e:
             print("Sourcing map failed:", *e.args)

@@ -188,12 +188,12 @@ class _MapTile(NamedTuple):
     Masks = dict[Coords, Code]
 
     path: Path
+    dlc: bool
     underground: bool
     lod: int
     x: int
     y: int
     code: Code
-
     @property
     def stem(self) -> str:
         ext = "".join(self.path.suffixes)
@@ -213,17 +213,33 @@ class _MapTile(NamedTuple):
 
     @classmethod
     def from_path(cls, path: Path):
-        # split until first dot, not necessairly extension in case of ".tpf.dcx"
+        """
+        Parses filename of map texture to create a MapTile object.
+        Filename formats:
+        MENU_MapTile_M00_L0_00_07_00010000.tpf.dcx
+                     |   |  |  |  `---- BYTES: 8-hex-digits, 0-F
+                     |   |  |  `------- Y: Y-coordinate, 00-40 (bottom to top)
+                     |   |  `---------- X: X-coordinate, 00-40 (left to right)
+                     |   `------------- L: Detail level, 0-4 (zoom level)
+                     `----------------- M: Map type format: M[DLC][Layer]
+                                         | DLC:   0 = Base game | 1 = DLC
+                                         | Layer: 0 = overworld | 1 = Underground
+        """
+        # split until first dot, not necessarily extension in case of ".tpf.dcx"
         filename, _ = path.name.split(".", 1)
 
         parts = filename.split("_")
         assert len(parts) == 7, f"Invalid map tile filename: {path}"
 
-        return cls(path, parts[2] == "M01", int(parts[3][1]), int(parts[4]), int(parts[5]), int(parts[6], 16))
+        map_type = parts[2]
+        dlc = map_type[1] == '1'
+        underground = map_type[2] == '1'
+
+        return cls(path, dlc, underground, int(parts[3][1]), int(parts[4]), int(parts[5]), int(parts[6], 16))
 
     @staticmethod
-    def glob(path: Path, extension: str, lod: int, underground: bool, masks: Masks) -> list["_MapTile"]:
-        glob_filter = f"*MENU_MapTile_M0{1 if underground else 0}_L{lod}*{extension}"
+    def glob(path: Path, extension: str, lod: int, dlc: bool, underground: bool, masks: Masks) -> list["_MapTile"]:
+        glob_filter = f"*MENU_MapTile_M{dlc:d}{underground:d}_L{lod}*{extension}"
         tiles = (_MapTile.from_path(p) for p in path.rglob(glob_filter))
 
         # filter the valid, fully-unlocked tile variants based on their bitmask
@@ -270,8 +286,9 @@ def _assemble_map(tiles: list[_MapTile], out: Path | None = None):
 
     lod = tiles[0].lod
     level = "underground" if tiles[0].underground else "overworld"
+    content_type = "_dlc_" if tiles[0].dlc else ""
 
-    print(f"Generating {X}x{Y} {level} map file with lod {lod}...", flush=True)
+    print(f"Generating {X}x{Y} {level} map file with lod {lod} for {content_type}...", flush=True)
 
     expected_size = 256
     worldmap = Image.new("RGB", (X * expected_size, Y * expected_size))
@@ -286,15 +303,15 @@ def _assemble_map(tiles: list[_MapTile], out: Path | None = None):
         worldmap.show()
         return
 
-    out = _prepare_writable_path(out, f"er_map_{level}_l{lod}.jpeg")
+    out = _prepare_writable_path(out, f"er_map{content_type}_{level}_l{lod}.jpeg")
     print(f"Writing to {out}...", flush=True)
 
     worldmap.save(out)
 
-def _parse_tile_masks(mask_dir: Path, lod: int = 0, underground: bool = False) -> _MapTile.Masks:
+def _parse_tile_masks(mask_dir: Path, lod: int = 0,  dlc: bool = False, underground: bool = False) -> _MapTile.Masks:
     masks: _MapTile.Masks = dict()
 
-    mtmsk = f"MENU_MapTile_M0{1 if underground else 0}.mtmsk"
+    mtmsk = f"MENU_MapTile_M{dlc:d}{underground:d}.mtmsk"
     tree = xmltree.parse(mask_dir / mtmsk)
 
     for entry in tree.getroot().findall(".//MapTileMask"):
@@ -319,7 +336,7 @@ def _unpack_missing_dds(yabber: _Tool, dds_files: list[Path]):
     for files_chunk in chunks(files, 20):
         yabber.run_command("Yabber.exe", *map(str, files_chunk))
 
-def source_map(game_dir: Path, out: Path | None = None, lod: int = 0, underground: bool = False, ignore_checksum: bool = False, keep_cache: bool = False):
+def source_map(game_dir: Path, out: Path | None = None, lod: int = 0, dlc: bool = False, underground: bool = False, ignore_checksum: bool = False, keep_cache: bool = False):
     manifest = _load_manifest()
 
     yabber, = _Tool.load_custom(game_dir, manifest, "Yabber")
@@ -329,21 +346,20 @@ def source_map(game_dir: Path, out: Path | None = None, lod: int = 0, undergroun
     mask_dir = game_dir / "menu" / "71_maptile-mtmskbnd-dcx" / "GR" / "data" / "INTERROOT_win64" / "menu" / "ScaleForm" / "maptile" / "mask"
 
     try:
-
         if not tile_dir.is_dir() or _is_empty(tile_dir):
             yabber.run_command("Yabber.exe", f"{game_dir}/menu/71_maptile.tpfbhd")
 
         if not mask_dir.is_dir() or _is_empty(mask_dir):
             yabber.run_command("Yabber.exe", f"{game_dir}/menu/71_maptile.mtmskbnd.dcx")
 
-        masks = _parse_tile_masks(mask_dir, lod, underground)
+        masks = _parse_tile_masks(mask_dir, lod, dlc, underground)
 
-        dcx_tiles = _MapTile.glob(tile_dir, ".tpf.dcx", lod, underground, masks)
+        dcx_tiles = _MapTile.glob(tile_dir, ".tpf.dcx", lod, dlc, underground, masks)
         dds_files = [t.path.parent / f"{t.stem}-tpf-dcx" / f"{t.stem}.dds" for t in dcx_tiles]
 
         _unpack_missing_dds(yabber, dds_files)
 
-        _assemble_map(_MapTile.glob(tile_dir, ".dds", lod, underground, masks), out)
+        _assemble_map(_MapTile.glob(tile_dir, ".dds", lod, dlc, underground, masks), out)
 
     except: raise
     finally: _process_cache(tile_dir, mask_dir, keep_cache=keep_cache)
